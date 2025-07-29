@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+
+import subprocess
+import os
+import sys
+import re
+
+IMAGE_KEYWORD = "isa"
+CONTAINER_KEY_PATH = "/app/state/test/key.pem"
+HOST_KEY_PATH = os.path.expanduser("~/Downloads/key.pem")
+
+def get_container_id_by_image(image_keyword):
+    try:
+        cmd = [
+            "docker", "ps", "--filter", f"ancestor={image_keyword}",
+            "--format", "{{.ID}}"
+        ]
+        result = subprocess.check_output(cmd, text=True).strip()
+        if not result:
+            print(f"No running container found with image containing '{image_keyword}'.")
+            sys.exit(1)
+        return result
+    except subprocess.CalledProcessError as e:
+        print(f"Error finding container: {e}")
+        sys.exit(1)
+
+def copy_key_from_container(container_id):
+    try:
+        subprocess.run(
+            ["docker", "cp", f"{container_id}:{CONTAINER_KEY_PATH}", HOST_KEY_PATH],
+            check=True
+        )
+        os.chmod(HOST_KEY_PATH, 0o600)
+        print(f"✅ Key copied to {HOST_KEY_PATH}")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to copy key.pem from container: {e}")
+        sys.exit(1)
+
+def extract_ip_from_logs(container_id):
+    try:
+        logs = subprocess.check_output(["docker", "logs", container_id], text=True)
+        match = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", logs)
+        if match:
+            return match.group(0)
+        else:
+            print("❌ No IP address found in container logs.")
+            sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Could not read logs: {e}")
+        sys.exit(1)
+
+def main():
+    container_id = get_container_id_by_image(IMAGE_KEYWORD)
+    copy_key_from_container(container_id)
+    ip = extract_ip_from_logs(container_id)
+    print("\n✅ SSH into the remote VM using this command:")
+    print(f"ssh -i {HOST_KEY_PATH} ubuntu@<vm_ip>")
+
+if __name__ == "__main__":
+    main()
